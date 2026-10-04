@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Which AI tool should I use?</title>
+<style>
+:root{--bg:#f2f5f7;--ink:#17222d;--mute:#5b6773;--line:#cfd8df;--acc:#0e6b6b;--card:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,Segoe UI,sans-serif}
+main{max-width:720px;margin:0 auto;padding:40px 20px 80px}
+h1{font:600 2rem/1.15 Georgia,serif;margin:0 0 8px}
+.sub{color:var(--mute);margin:0 0 28px}
+textarea{width:100%;min-height:96px;padding:12px;border:1px solid var(--line);border-radius:6px;font:inherit;resize:vertical;background:var(--card)}
+textarea:focus,select:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.row{display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap}
+select{padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font:inherit}
+button{padding:10px 20px;border:0;border-radius:6px;background:var(--acc);color:#fff;font:600 1rem system-ui;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+#status{color:var(--mute);margin:20px 0 0;min-height:1.5em}
+.err{color:#9b2c2c}
+.step{background:var(--card);border-left:4px solid var(--acc);padding:14px 18px;margin-top:16px;border-radius:0 6px 6px 0}
+.step h2{font:600 1.15rem Georgia,serif;margin:0 0 8px}
+.tool{padding:8px 0;border-top:1px solid var(--line)}
+.tool:first-of-type{border-top:0}
+.tool a{color:var(--acc);font-weight:600}
+.tool span{display:block;color:var(--mute);font-size:.94rem}
+</style>
+</head>
+<body>
+<main>
+<h1>Which AI tool should I use?</h1>
+<p class="sub">Describe what you are trying to get done, in your own words. You get an ordered plan with tools for each step.</p>
+<textarea id="goal" placeholder="Example: I am starting a paper on microfinance and household savings."></textarea>
+<div class="row">
+  <button id="go">Make my plan</button>
+  <label>Model <select id="model"><option>gemma4:e2b</option><option>gemma4:e4b</option></select></label>
+</div>
+<p id="status" role="status"></p>
+<div id="out"></div>
+</main>
+<script>
+const HOST = location.protocol.startsWith("http") ? "" : "http://localhost:11434";
+
+// The model may only pick from these task ids.
+const TASKS = {
+  find:    "Find papers and literature",
+  read:    "Read and summarize papers",
+  cite:    "Manage references and citations",
+  analyze: "Analyze data and run econometrics",
+  write:   "Write and edit the manuscript",
+  notes:   "Take and organize notes",
+  teach:   "Manage teaching and academic admin"
+};
+const TASK_HELP = {
+  find:"searching for papers, literature review, related work",
+  read:"understanding, summarizing, or questioning papers already found",
+  cite:"saving sources, bibliographies, citation formatting",
+  analyze:"datasets, regressions, statistics, charts",
+  write:"drafting, grammar, formatting, LaTeX",
+  notes:"notes, ideas, meeting or lecture capture",
+  teach:"grading, courses, deadlines, tracking academic tasks"
+};
+
+// Edit this list. The model never names tools; it only picks task ids above.
+const CATALOG = [
+ {n:"Elicit",t:["find","read"],w:"Searches academic papers and pulls methods and findings into a table.",u:"https://elicit.com"},
+ {n:"Consensus",t:["find"],w:"Answers a research question using findings from published papers.",u:"https://consensus.app"},
+ {n:"Semantic Scholar",t:["find"],w:"Free academic search with citation counts and related-paper suggestions.",u:"https://www.semanticscholar.org"},
+ {n:"Connected Papers",t:["find"],w:"Draws a map of papers related to one paper you already know.",u:"https://www.connectedpapers.com"},
+ {n:"ResearchRabbit",t:["find"],w:"Builds reading lists from papers you like and tracks new related work.",u:"https://www.researchrabbit.ai"},
+ {n:"scite",t:["find","read"],w:"Shows whether later papers support or dispute a given paper.",u:"https://scite.ai"},
+ {n:"SciSpace",t:["read"],w:"Lets you chat with a paper and explains hard passages in plain language.",u:"https://scispace.com"},
+ {n:"NotebookLM",t:["read","notes"],w:"Upload papers and notes, then ask questions answered from those sources.",u:"https://notebooklm.google.com"},
+ {n:"Zotero",t:["cite"],w:"Free reference manager. Saves papers from your browser and formats citations.",u:"https://www.zotero.org"},
+ {n:"Mendeley",t:["cite"],w:"Reference manager with PDF annotation and shared libraries.",u:"https://www.mendeley.com"},
+ {n:"Julius AI",t:["analyze"],w:"Upload a spreadsheet and ask for analyses and charts in plain English.",u:"https://julius.ai"},
+ {n:"RStudio (R)",t:["analyze"],w:"Free statistics environment widely used for econometrics.",u:"https://posit.co/download/rstudio-desktop/"},
+ {n:"Jupyter",t:["analyze"],w:"Notebooks for Python analysis, such as regressions with statsmodels.",u:"https://jupyter.org"},
+ {n:"Stata",t:["analyze"],w:"Paid statistics package that is a standard in economics research.",u:"https://www.stata.com"},
+ {n:"Paperpal",t:["write"],w:"Grammar and phrasing suggestions tuned for academic manuscripts.",u:"https://paperpal.com"},
+ {n:"Grammarly",t:["write"],w:"General grammar and clarity checks for any writing.",u:"https://www.grammarly.com"},
+ {n:"Overleaf",t:["write"],w:"Online LaTeX editor for formatted papers and equations, with co-authors.",u:"https://www.overleaf.com"},
+ {n:"Obsidian",t:["notes"],w:"Notes app that links ideas together and keeps files on your computer.",u:"https://obsidian.md"},
+ {n:"Notion",t:["notes","teach"],w:"Notes and tables for tracking courses, tasks, and deadlines.",u:"https://www.notion.so"},
+ {n:"Otter.ai",t:["notes"],w:"Records and transcribes meetings and lectures.",u:"https://otter.ai"},
+ {n:"Gradescope",t:["teach"],w:"Speeds up grading and feedback on exams and assignments.",u:"https://www.gradescope.com"}
+];
+
+const $ = id => document.getElementById(id);
+
+async function route(goal, model){
+  const schema = {type:"object",properties:{tasks:{type:"array",items:{type:"string",enum:Object.keys(TASKS)}}},required:["tasks"]};
+  const list = Object.entries(TASK_HELP).map(([k,v])=>`- ${k}: ${v}`).join("\n");
+  const system = "You help a university professor plan which kinds of work she needs. "+
+    "From the task ids below, choose only the ones her goal actually needs, in the order she should do them. "+
+    "Reply as JSON: {\"tasks\":[...]}.\n"+list;
+  const res = await fetch(HOST+"/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({model,stream:false,format:schema,options:{temperature:0},
+      messages:[{role:"system",content:system},{role:"user",content:goal}]})});
+  if(!res.ok) throw new Error("Ollama returned "+res.status+". Is the model downloaded? Run: ollama pull "+model);
+  const data = await res.json();
+  const ids = JSON.parse(data.message.content).tasks || [];
+  return [...new Set(ids)].filter(id => TASKS[id]);
+}
+
+function render(ids){
+  const out = $("out"); out.innerHTML = "";
+  ids.forEach(id=>{
+    const box = document.createElement("section"); box.className="step";
+    const h = document.createElement("h2"); h.textContent = TASKS[id]; box.appendChild(h);
+    CATALOG.filter(c=>c.t.includes(id)).forEach(c=>{
+      const d = document.createElement("div"); d.className="tool";
+      const a = document.createElement("a"); a.href=c.u; a.target="_blank"; a.rel="noopener"; a.textContent=c.n;
+      const s = document.createElement("span"); s.textContent=c.w;
+      d.append(a,s); box.appendChild(d);
+    });
+    out.appendChild(box);
+  });
+}
+
+$("go").onclick = async ()=>{
+  const goal = $("goal").value.trim(), model = $("model").value, st = $("status");
+  if(!goal){ st.className=""; st.textContent="Type what you want to get done first."; return; }
+  $("go").disabled = true; st.className=""; st.textContent="Thinking. The first run can take a minute."; $("out").innerHTML="";
+  const t0 = performance.now();
+  try{
+    const ids = await route(goal, model);
+    const secs = ((performance.now()-t0)/1000).toFixed(1);
+    if(!ids.length){ st.textContent="No matching steps found. Try describing your goal with more detail."; }
+    else { render(ids); st.textContent = ids.length+" steps, "+secs+" seconds with "+model+"."; }
+  }catch(e){
+    st.className="err";
+    st.textContent = "Could not reach Ollama. Check that it is running. If it is, allow this page: set OLLAMA_ORIGINS to * and restart Ollama. Details: "+e.message;
+  }finally{ $("go").disabled = false; }
+};
+</script>
+</body>
+</html>
